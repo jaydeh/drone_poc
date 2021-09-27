@@ -1,0 +1,82 @@
+kind: pipeline
+type: docker
+name: main pipeline
+
+steps:
+  - name: hello world
+    image: mcr.microsoft.com/dotnet/framework/sdk:3.5
+    commands:
+      - dotnet build "Database/Database1/Database.build/database.build.csproj"
+      - cd "Database/Database1/Database.build/bin"
+      - ls
+
+trigger:
+  branch:
+    - main
+  event:
+    include:
+      - push
+    exclude:
+      - promote
+
+---
+
+kind: pipeline
+type: docker
+name: add files to storage
+
+steps:
+  - name: check for components
+    image: mcr.microsoft.com/azure-cli
+    environment:
+      DRONE_SP_PASS:
+        from_secret: drone_sp_pass
+      DEV_STG_ACC_KEY:
+        from_secret: DEV_STG_ACC_KEY
+    commands:
+      - echo ${DRONE_TAG}
+      - ./"Shell Scripts"/"Push to Storage"/post_adf.sh
+      - if [[ ${DRONE_TAG} = *"db"* ]]; then echo "deploying db"; else echo "exiting";exit 0; fi;
+
+trigger:
+  ref:
+    include:
+      - refs/tags/**
+
+---
+
+kind: pipeline
+type: docker
+name: promote to tst
+
+steps:
+  - name: get files
+    image: golang
+    commands:
+      - echo "check each variable then if yes get their latest files"
+
+  - name: db deployment
+    image: golang
+    commands:
+      - if [ ${DB,,} = "yes" ]; then echo "deploying db"; else echo "exiting";exit 0; fi;
+
+  - name: adf deployment
+    image: mcr.microsoft.com/azure-cli
+    environment:
+      DRONE_SP_PASS:
+        from_secret: drone_sp_pass
+      DEV_STG_ACC_KEY:
+        from_secret: DEV_STG_ACC_KEY
+    commands:
+      - if [ ${ADF,,} = "yes" ]; then ./"Shell Scripts"/Deploy/deploy_adf.sh; else echo "exiting";exit 0; fi;
+
+  - name: pbi
+    image: golang
+    commands:
+      - if [ ${PBI,,} = "yes" ]; then echo "deploying pbi"; else echo "exiting";exit 0; fi;
+
+trigger:
+  event:
+    - promote
+  target:
+    - tst
